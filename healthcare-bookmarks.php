@@ -547,7 +547,7 @@ class HealthcareBookmarks {
                     },
                     success: function(response) {
                         if (response.success) {
-                            $(".hb-login-form").html("<div class=\\"hb-success-message\\">✅ Access link sent! Check your email.</div>");
+                            $(".hb-login-form").html("<div class=\\"hb-login-success\\"><h3>✅ Access Link Sent!</h3><p>Check your email and click the link to view your bookmarks.</p></div>");
                         } else {
                             showLoginError(response.data);
                             button.prop("disabled", false).text("Send Access Link");
