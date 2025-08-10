@@ -1,0 +1,539 @@
+.hb-bookmark-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    color: #333;
+}
+
+.hb-bookmark-btn:hover {
+    background: #e0e0e0;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.hb-bookmark-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.hb-bookmark-btn.hb-bookmarked {
+    background: #007cba;
+    color: white;
+    border-color: #005a87;
+}
+
+.hb-bookmark-btn.hb-bookmarked:hover {
+    background: #005a87;
+}
+
+.hb-bookmark-btn .hb-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hb-bookmark-btn .hb-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.hb-bookmark-btn.hb-bookmarked .hb-icon svg {
+    fill: currentColor;
+}
+
+.hb-counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    text-decoration: none;
+    color: inherit;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.hb-counter:hover {
+    background: rgba(0, 0, 0, 0.05);
+    text-decoration: none;
+    color: inherit;
+}
+
+.hb-counter-icon {
+    font-size: 18px;
+}
+
+.hb-counter-number {
+    background: #007cba;
+    color: white;
+    border-radius: 50%;
+    min-width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.hb-bookmarks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+    margin: 24px 0;
+}
+
+.hb-bookmark-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: all 0.3s ease;
+}
+
+.hb-bookmark-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+.hb-bookmark-thumbnail {
+    width: 100%;
+    height: 200px;
+    overflow: hidden;
+    position: relative;
+}
+
+.hb-bookmark-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.hb-bookmark-card:hover .hb-bookmark-thumbnail img {
+    transform: scale(1.05);
+}
+
+.hb-no-image {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.hb-bookmark-content {
+    padding: 20px;
+}
+
+.hb-bookmark-content h3 {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.hb-bookmark-content h3 a {
+    color: #007cba;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.hb-bookmark-content h3 a:hover {
+    color: #005a87;
+    text-decoration: underline;
+}
+
+.hb-bookmark-content p {
+    margin: 0 0 16px 0;
+    color: #666;
+    line-height: 1.5;
+    font-size: 14px;
+}
+
+.hb-bookmark-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.hb-bookmark-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 16px;
+    background: #007cba;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    flex: 1;
+    justify-content: center;
+}
+
+.hb-bookmark-link:hover {
+    background: #005a87;
+    color: white;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.hb-remove-bookmark {
+    padding: 10px 16px;
+    background: #dc3232;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.hb-remove-bookmark:hover {
+    background: #a00;
+    transform: translateY(-1px);
+}
+
+.hb-remove-bookmark:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .hb-bookmarks-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+        margin: 16px 0;
+    }
+    
+    .hb-bookmark-content {
+        padding: 16px;
+    }
+    
+    .hb-bookmark-actions {
+        flex-direction: column;
+    }
+    
+    .hb-bookmark-link {
+        flex: none;
+        width: 100%;
+    }
+}
+
+/* Loading states */
+.hb-bookmark-btn.loading {
+    pointer-events: none;
+}
+
+.hb-bookmark-btn.loading .hb-icon::before {
+    content: '⏳';
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Empty state */
+.hb-bookmarks-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+}
+
+.hb-bookmarks-empty h3 {
+    margin: 0 0 12px 0;
+    color: #333;
+}
+
+/* Elegant Modal Styles */
+.hb-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.hb-modal.hb-modal-show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.hb-modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+}
+
+.hb-modal-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    width: 90%;
+    max-width: 400px;
+    overflow: hidden;
+    transition: transform 0.3s ease;
+}
+
+.hb-modal.hb-modal-show .hb-modal-content {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.hb-modal-header {
+    padding: 20px 20px 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.hb-modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.hb-modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #999;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.hb-modal-close:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+.hb-modal-body {
+    padding: 20px;
+    color: #666;
+    line-height: 1.5;
+}
+
+.hb-modal-body p {
+    margin: 0;
+}
+
+.hb-modal-footer {
+    padding: 0 20px 20px 20px;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.hb-modal-cancel,
+.hb-modal-confirm {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.hb-modal-cancel {
+    background: #f5f5f5;
+    color: #666;
+}
+
+.hb-modal-cancel:hover {
+    background: #e0e0e0;
+    color: #333;
+}
+
+.hb-modal-confirm {
+    background: #dc3232;
+    color: white;
+}
+
+.hb-modal-confirm:hover {
+    background: #a00;
+    transform: translateY(-1px);
+}
+
+/* Error Message Styles */
+.hb-error-message {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #dc3232;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(220, 50, 50, 0.3);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 300px;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+}
+
+.hb-error-message.hb-error-show {
+    transform: translateX(0);
+}
+
+.hb-error-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    margin-left: auto;
+}
+
+.hb-error-close:hover {
+    opacity: 0.8;
+}
+
+/* Success Message Styles */
+.hb-success-message {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #46b450;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(70, 180, 80, 0.3);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 300px;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+}
+
+.hb-success-message.hb-success-show {
+    transform: translateX(0);
+}
+
+.hb-success-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    margin-left: auto;
+}
+
+.hb-success-close:hover {
+    opacity: 0.8;
+}
+
+/* Email Input Modal Styles */
+.hb-email-input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 16px;
+    margin: 12px 0;
+    transition: border-color 0.2s ease;
+}
+
+.hb-email-input:focus {
+    outline: none;
+    border-color: #007cba;
+    box-shadow: 0 0 0 3px rgba(0, 124, 186, 0.1);
+}
+
+.hb-email-input.error {
+    border-color: #dc3232;
+    box-shadow: 0 0 0 3px rgba(220, 50, 50, 0.1);
+}
+
+.hb-email-error {
+    color: #dc3232;
+    font-size: 14px;
+    margin: -8px 0 8px 0;
+}
+
+.hb-email-note {
+    font-size: 14px;
+    color: #666;
+    margin: 8px 0 0 0;
+    font-style: italic;
+}
+
+/* Consent Checkbox Styles */
+.hb-consent-wrapper {
+    margin: 16px 0;
+}
+
+.hb-consent-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.hb-consent-checkbox {
+    margin: 2px 0 0 0;
+    flex-shrink: 0;
+}
+
+.hb-consent-text {
+    color: #666;
+}

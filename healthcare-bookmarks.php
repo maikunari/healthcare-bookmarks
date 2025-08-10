@@ -1,0 +1,761 @@
+<?php
+/**
+ * Plugin Name: Healthcare Provider Bookmarks
+ * Description: Magic link bookmarking system for healthcare providers with email capture
+ * Version: 1.0.0
+ * Author: maikunari
+ */
+
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class HealthcareBookmarks {
+    
+    private $table_name;
+    private $emails_table;
+    
+    public function __construct() {
+        global $wpdb;
+        $this->table_name = $wpdb->prefix . 'healthcare_bookmarks';
+        $this->emails_table = $wpdb->prefix . 'healthcare_emails';
+        
+        add_action('init', array($this, 'init'));
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        add_action('admin_menu', array($this, 'admin_menu'));
+        add_action('wp_ajax_send_magic_link', array($this, 'send_magic_link'));
+        add_action('wp_ajax_nopriv_send_magic_link', array($this, 'send_magic_link'));
+        add_action('wp_ajax_toggle_bookmark', array($this, 'toggle_bookmark'));
+        add_action('wp_ajax_get_bookmark_count', array($this, 'get_bookmark_count'));
+        add_action('wp_ajax_nopriv_get_bookmark_count', array($this, 'get_bookmark_count'));
+        add_action('wp_ajax_export_emails', array($this, 'export_emails'));
+        add_action('template_redirect', array($this, 'handle_magic_link'));
+        add_action('admin_init', array($this, 'block_dashboard_access'));
+        add_action('wp_before_admin_bar_render', array($this, 'hide_admin_bar_for_bookmark_users'));
+        
+        register_activation_hook(__FILE__, array($this, 'create_tables'));
+        add_action('init', array($this, 'register_blocks'));
+        add_shortcode('healthcare_bookmarks', array($this, 'bookmarks_shortcode'));
+    }
+    
+    public function init() {
+        // Initialize plugin
+    }
+    
+    public function create_tables() {
+        global $wpdb;
+        
+        $charset_collate = $wpdb->get_charset_collate();
+        
+        // Bookmarks table
+        $sql1 = "CREATE TABLE $this->table_name (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            user_id bigint(20) NOT NULL,
+            post_id bigint(20) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY user_post (user_id, post_id)
+        ) $charset_collate;";
+        
+        // Emails table
+        $sql2 = "CREATE TABLE $this->emails_table (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            email varchar(100) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY email (email)
+        ) $charset_collate;";
+        
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql1);
+        dbDelta($sql2);
+        
+        // Set default options
+        add_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
+        add_option('hb_email_message', 'Click the link below to bookmark this healthcare provider:\n\n[MAGIC_LINK]\n\nThis link expires in 15 minutes.');
+    }
+    
+    public function enqueue_scripts() {
+        wp_enqueue_script(
+            'healthcare-bookmarks',
+            plugin_dir_url(__FILE__) . 'assets/bookmarks.js',
+            array('jquery'),
+            '1.0.0',
+            true
+        );
+        
+        wp_enqueue_style(
+            'healthcare-bookmarks',
+            plugin_dir_url(__FILE__) . 'assets/bookmarks.css',
+            array(),
+            '1.0.0'
+        );
+        
+        wp_localize_script('healthcare-bookmarks', 'hb_ajax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('hb_nonce')
+        ));
+    }
+    
+    public function register_blocks() {
+        // Bookmark Button Block
+        wp_register_script(
+            'hb-bookmark-button-block',
+            plugin_dir_url(__FILE__) . 'blocks/bookmark-button.js',
+            array('wp-blocks', 'wp-element', 'wp-editor'),
+            '1.0.0'
+        );
+        
+        register_block_type('healthcare-bookmarks/bookmark-button', array(
+            'editor_script' => 'hb-bookmark-button-block',
+            'render_callback' => array($this, 'render_bookmark_button')
+        ));
+        
+        // Bookmark Counter Block
+        wp_register_script(
+            'hb-bookmark-counter-block',
+            plugin_dir_url(__FILE__) . 'blocks/bookmark-counter.js',
+            array('wp-blocks', 'wp-element', 'wp-editor'),
+            '1.0.0'
+        );
+        
+        register_block_type('healthcare-bookmarks/bookmark-counter', array(
+            'editor_script' => 'hb-bookmark-counter-block',
+            'render_callback' => array($this, 'render_bookmark_counter')
+        ));
+    }
+    
+    public function render_bookmark_button($attributes) {
+        global $post;
+        
+        if (!$post || $post->post_type !== 'healthcare_provider') {
+            return '';
+        }
+        
+        $user_id = get_current_user_id();
+        $is_bookmarked = false;
+        
+        if ($user_id) {
+            global $wpdb;
+            $is_bookmarked = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM $this->table_name WHERE user_id = %d AND post_id = %d",
+                $user_id, $post->ID
+            ));
+        }
+        
+        $icon_class = $is_bookmarked ? 'hb-bookmarked' : 'hb-not-bookmarked';
+        $button_text = $is_bookmarked ? 'Bookmarked' : 'Bookmark';
+        
+        // Feather bookmark SVG icon
+        $bookmark_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg>';
+        
+        return sprintf(
+            '<button class="hb-bookmark-btn %s" data-post-id="%d">
+                <span class="hb-icon">%s</span>
+                <span class="hb-text">%s</span>
+            </button>',
+            $icon_class,
+            $post->ID,
+            $bookmark_svg,
+            $button_text
+        );
+    }
+    
+    public function render_bookmark_counter($attributes) {
+        $user_id = get_current_user_id();
+        $count = 0;
+        
+        if ($user_id) {
+            global $wpdb;
+            $count = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $this->table_name WHERE user_id = %d",
+                $user_id
+            ));
+        }
+        
+        $bookmarks_page = get_option('hb_bookmarks_page', '#');
+        
+        // Feather bookmark SVG icon for counter
+        $bookmark_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg>';
+        
+        return sprintf(
+            '<a href="%s" class="hb-counter">
+                <span class="hb-counter-icon">%s</span>
+                <span class="hb-counter-text">My Bookmarks</span>
+                <span class="hb-counter-number">%d</span>
+            </a>',
+            $bookmarks_page,
+            $bookmark_svg,
+            $count
+        );
+    }
+    
+    public function send_magic_link() {
+        check_ajax_referer('hb_nonce', 'nonce');
+        
+        $email = sanitize_email($_POST['email']);
+        $post_id = intval($_POST['post_id']);
+        
+        if (!is_email($email) || !$post_id) {
+            wp_send_json_error('Invalid email or post ID');
+        }
+        
+        // Rate limiting: Check if email was sent recently (prevent spam)
+        $recent_attempt = get_transient('hb_rate_limit_' . md5($email));
+        if ($recent_attempt) {
+            wp_send_json_error('Please wait a moment before requesting another link');
+        }
+        
+        // Set rate limit (1 email per 2 minutes per email address)
+        set_transient('hb_rate_limit_' . md5($email), true, 2 * 60);
+        
+        // Store email with consent flag
+        global $wpdb;
+        $wpdb->replace($this->emails_table, array(
+            'email' => $email,
+            'created_at' => current_time('mysql')
+        ));
+        
+        // Generate secure magic link token
+        $token = wp_generate_password(32, false);
+        $expires = time() + (15 * 60); // 15 minutes
+        
+        set_transient('hb_magic_' . $token, array(
+            'email' => $email,
+            'post_id' => $post_id,
+            'expires' => $expires,
+            'ip' => $this->get_user_ip() // Track IP for security
+        ), 15 * 60);
+        
+        $magic_link = add_query_arg(array(
+            'hb_magic' => $token
+        ), home_url());
+        
+        // Get email template
+        $subject = get_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
+        $message = get_option('hb_email_message', 'Click the link below to bookmark this healthcare provider:\n\n[MAGIC_LINK]\n\nThis link expires in 15 minutes.');
+        
+        $post_title = get_the_title($post_id);
+        $subject = str_replace('[POST_TITLE]', $post_title, $subject);
+        $message = str_replace('[POST_TITLE]', $post_title, $message);
+        
+        // Create a proper HTML link
+        $html_link = '<a href="' . esc_url($magic_link) . '" style="color: #007cba; text-decoration: none; font-weight: bold; padding: 12px 24px; background: #f0f8ff; border: 1px solid #007cba; border-radius: 4px; display: inline-block; margin: 10px 0;">Click Here to Bookmark</a>';
+        
+        $message = str_replace('[MAGIC_LINK]', $html_link, $message);
+        
+        // Clean up all possible line break variations thoroughly
+        $message = str_replace(['\\n', '\n', '\\\\n'], '<br>', $message);
+        $message = str_replace(['\\r', '\r', '\\\\r'], '', $message);
+        $message = str_replace(['\\t', '\t'], '&nbsp;&nbsp;&nbsp;&nbsp;', $message);
+        
+        // Remove any remaining backslashes that might be escaping
+        $message = str_replace('\\', '', $message);
+        
+        // Convert remaining actual line breaks
+        $message = nl2br($message);
+        
+        // Set email headers for HTML
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
+        );
+        
+        $sent = wp_mail($email, $subject, $message, $headers);
+        
+        if ($sent) {
+            wp_send_json_success('Magic link sent! Check your email.');
+        } else {
+            wp_send_json_error('Failed to send email. Please try again.');
+        }
+    }
+    
+    public function handle_magic_link() {
+        if (!isset($_GET['hb_magic'])) {
+            return;
+        }
+        
+        $token = sanitize_text_field($_GET['hb_magic']);
+        $data = get_transient('hb_magic_' . $token);
+        
+        if (!$data) {
+            wp_die('Invalid or expired magic link.', 'Magic Link Error', array('response' => 403));
+        }
+        
+        // Security: Verify IP matches (optional - can be disabled for mobile users)
+        // if ($data['ip'] !== $this->get_user_ip()) {
+        //     wp_die('Security check failed.', 'Magic Link Error', array('response' => 403));
+        // }
+        
+        $email = $data['email'];
+        $post_id = $data['post_id'];
+        
+        // Verify post still exists and is healthcare_provider
+        $post = get_post($post_id);
+        if (!$post || $post->post_type !== 'healthcare_provider') {
+            wp_die('Invalid healthcare provider.', 'Magic Link Error', array('response' => 404));
+        }
+        
+        // Check if user exists
+        $user = get_user_by('email', $email);
+        
+        if (!$user) {
+            // Create new user with minimal permissions
+            $username = sanitize_user(explode('@', $email)[0]);
+            $counter = 1;
+            $original_username = $username;
+            
+            while (username_exists($username)) {
+                $username = $original_username . $counter;
+                $counter++;
+            }
+            
+            $user_id = wp_create_user($username, wp_generate_password(20, true), $email);
+            
+            if (is_wp_error($user_id)) {
+                wp_die('Failed to create user account.', 'Account Error', array('response' => 500));
+            }
+            
+            $user = get_user_by('id', $user_id);
+            
+            // Set minimal role and permissions
+            $user->set_role('subscriber');
+            
+            // Mark as bookmark-only user and hide admin bar
+            add_user_meta($user_id, 'hb_bookmark_user', true);
+            add_user_meta($user_id, 'show_admin_bar_front', false);
+            update_user_meta($user_id, 'show_admin_bar_admin', false);
+        }
+        
+        // Log in user securely
+        wp_clear_auth_cookie();
+        wp_set_current_user($user->ID);
+        wp_set_auth_cookie($user->ID, false, is_ssl()); // Secure cookie if SSL
+        
+        // Add bookmark
+        global $wpdb;
+        $result = $wpdb->replace($this->table_name, array(
+            'user_id' => $user->ID,
+            'post_id' => $post_id,
+            'created_at' => current_time('mysql')
+        ));
+        
+        if ($result === false) {
+            wp_die('Failed to save bookmark.', 'Bookmark Error', array('response' => 500));
+        }
+        
+        // Delete used token immediately
+        delete_transient('hb_magic_' . $token);
+        
+        // Redirect to original post with success message
+        $redirect_url = add_query_arg('hb_bookmarked', '1', get_permalink($post_id));
+        wp_safe_redirect($redirect_url);
+        exit;
+    }
+    
+    public function toggle_bookmark() {
+        check_ajax_referer('hb_nonce', 'nonce');
+        
+        if (!is_user_logged_in()) {
+            wp_send_json_error('Not logged in');
+        }
+        
+        $user_id = get_current_user_id();
+        $post_id = intval($_POST['post_id']);
+        
+        global $wpdb;
+        
+        $exists = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM $this->table_name WHERE user_id = %d AND post_id = %d",
+            $user_id, $post_id
+        ));
+        
+        if ($exists) {
+            // Remove bookmark
+            $wpdb->delete($this->table_name, array(
+                'user_id' => $user_id,
+                'post_id' => $post_id
+            ));
+            wp_send_json_success(array('action' => 'removed', 'bookmarked' => false));
+        } else {
+            // Add bookmark
+            $wpdb->insert($this->table_name, array(
+                'user_id' => $user_id,
+                'post_id' => $post_id,
+                'created_at' => current_time('mysql')
+            ));
+            wp_send_json_success(array('action' => 'added', 'bookmarked' => true));
+        }
+    }
+    
+    public function get_bookmark_count() {
+        $user_id = get_current_user_id();
+        $count = 0;
+        
+        if ($user_id) {
+            global $wpdb;
+            $count = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $this->table_name WHERE user_id = %d",
+                $user_id
+            ));
+        }
+        
+        wp_send_json_success(array('count' => $count));
+    }
+    
+    public function bookmarks_shortcode($atts) {
+        if (!is_user_logged_in()) {
+            return '<p>Please log in to view your bookmarks.</p>';
+        }
+        
+        $user_id = get_current_user_id();
+        global $wpdb;
+        
+        $bookmarks = $wpdb->get_results($wpdb->prepare(
+            "SELECT post_id FROM $this->table_name WHERE user_id = %d ORDER BY created_at DESC",
+            $user_id
+        ));
+        
+        if (empty($bookmarks)) {
+            return '<div class="hb-bookmarks-empty"><h3>No bookmarks yet</h3><p>You haven\'t bookmarked any healthcare providers yet.</p></div>';
+        }
+        
+        $output = '<div class="hb-bookmarks-grid">';
+        
+        foreach ($bookmarks as $bookmark) {
+            $post = get_post($bookmark->post_id);
+            if (!$post) continue;
+            
+            $thumbnail = get_the_post_thumbnail($post->ID, 'medium');
+            $title = get_the_title($post->ID);
+            $permalink = get_permalink($post->ID);
+            $excerpt = wp_trim_words(get_the_excerpt($post->ID), 20);
+            
+            $output .= sprintf(
+                '<div class="hb-bookmark-card">
+                    <div class="hb-bookmark-thumbnail">%s</div>
+                    <div class="hb-bookmark-content">
+                        <h3><a href="%s">%s</a></h3>
+                        <p>%s</p>
+                        <div class="hb-bookmark-actions">
+                            <a href="%s" class="hb-bookmark-link">View Provider</a>
+                            <button class="hb-remove-bookmark" data-post-id="%d">Remove</button>
+                        </div>
+                    </div>
+                </div>',
+                $thumbnail ?: '<div class="hb-no-image">No Image</div>',
+                $permalink,
+                $title,
+                $excerpt,
+                $permalink,
+                $post->ID
+            );
+        }
+        
+        $output .= '</div>';
+        
+        return $output;
+    }
+    
+    public function admin_menu() {
+        add_options_page(
+            'Healthcare Bookmarks',
+            'Healthcare Bookmarks',
+            'manage_options',
+            'healthcare-bookmarks',
+            array($this, 'admin_page')
+        );
+        
+        add_management_page(
+            'Email Subscribers',
+            'Email Subscribers',
+            'manage_options',
+            'healthcare-emails',
+            array($this, 'emails_page')
+        );
+    }
+    
+    public function admin_page() {
+        if (isset($_POST['submit'])) {
+            update_option('hb_email_subject', sanitize_text_field($_POST['email_subject']));
+            update_option('hb_email_message', sanitize_textarea_field($_POST['email_message']));
+            update_option('hb_bookmarks_page', esc_url($_POST['bookmarks_page']));
+            echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+        }
+        
+        $email_subject = get_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
+        $email_message = get_option('hb_email_message', 'Click the link below to bookmark this healthcare provider:\n\n[MAGIC_LINK]\n\nThis link expires in 15 minutes.');
+        $bookmarks_page = get_option('hb_bookmarks_page', '');
+        
+        global $wpdb;
+        $email_count = $wpdb->get_var("SELECT COUNT(*) FROM $this->emails_table");
+        $bookmark_count = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name");
+        
+        ?>
+        <div class="wrap">
+            <h1>Healthcare Bookmarks Settings</h1>
+            
+            <div class="hb-stats" style="background: #fff; padding: 20px; margin: 20px 0; border: 1px solid #ccc;">
+                <h3>Statistics</h3>
+                <p><strong>Total Emails Collected:</strong> <?php echo $email_count; ?></p>
+                <p><strong>Total Bookmarks:</strong> <?php echo $bookmark_count; ?></p>
+            </div>
+            
+            <form method="post">
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">Magic Link Email Subject</th>
+                        <td>
+                            <input type="text" name="email_subject" value="<?php echo esc_attr($email_subject); ?>" class="regular-text" />
+                            <p class="description">Use [POST_TITLE] for the post title</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Magic Link Email Message</th>
+                        <td>
+                            <textarea name="email_message" rows="5" class="large-text"><?php echo esc_textarea($email_message); ?></textarea>
+                            <p class="description">Use [POST_TITLE] for post title and [MAGIC_LINK] for the magic link</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">My Bookmarks Page URL</th>
+                        <td>
+                            <input type="url" name="bookmarks_page" value="<?php echo esc_attr($bookmarks_page); ?>" class="regular-text" />
+                            <p class="description">URL of the page with the [healthcare_bookmarks] shortcode</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <?php submit_button(); ?>
+            </form>
+            
+            <h3>Usage Instructions</h3>
+            <ol>
+                <li>Add the "Healthcare Bookmark Button" block to your healthcare provider posts</li>
+                <li>Add the "Healthcare Bookmark Counter" block to your header/navigation</li>
+                <li>Create a "My Bookmarks" page and add the shortcode: <code>[healthcare_bookmarks]</code></li>
+                <li>Set the My Bookmarks page URL in the settings above</li>
+            </ol>
+        </div>
+        <?php
+    }
+    
+    public function emails_page() {
+        global $wpdb;
+        
+        // Handle bulk actions
+        if (isset($_POST['action']) && $_POST['action'] === 'delete_selected' && isset($_POST['emails'])) {
+            $email_ids = array_map('intval', $_POST['emails']);
+            $placeholders = implode(',', array_fill(0, count($email_ids), '%d'));
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM $this->emails_table WHERE id IN ($placeholders)",
+                $email_ids
+            ));
+            echo '<div class="notice notice-success"><p>Selected emails deleted successfully.</p></div>';
+        }
+        
+        // Pagination
+        $per_page = 20;
+        $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+        $offset = ($current_page - 1) * $per_page;
+        
+        $total_emails = $wpdb->get_var("SELECT COUNT(*) FROM $this->emails_table");
+        $total_pages = ceil($total_emails / $per_page);
+        
+        $emails = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $this->emails_table ORDER BY created_at DESC LIMIT %d OFFSET %d",
+            $per_page, $offset
+        ));
+        
+        ?>
+        <div class="wrap">
+            <h1>Email Subscribers 
+                <a href="#" class="page-title-action" id="export-emails">Export All</a>
+            </h1>
+            
+            <div class="hb-stats" style="background: #fff; padding: 20px; margin: 20px 0; border: 1px solid #ccc;">
+                <h3>Statistics</h3>
+                <p><strong>Total Email Subscribers:</strong> <?php echo $total_emails; ?></p>
+                <p><strong>Showing:</strong> <?php echo count($emails); ?> of <?php echo $total_emails; ?> emails</p>
+            </div>
+            
+            <?php if (empty($emails)): ?>
+                <p>No email subscribers yet.</p>
+            <?php else: ?>
+                <form method="post">
+                    <div class="tablenav top">
+                        <div class="alignleft actions bulkactions">
+                            <select name="action">
+                                <option value="-1">Bulk Actions</option>
+                                <option value="delete_selected">Delete</option>
+                            </select>
+                            <input type="submit" class="button action" value="Apply">
+                        </div>
+                        
+                        <?php if ($total_pages > 1): ?>
+                        <div class="tablenav-pages">
+                            <span class="displaying-num"><?php echo $total_emails; ?> items</span>
+                            <?php
+                            $page_links = paginate_links(array(
+                                'base' => add_query_arg('paged', '%#%'),
+                                'format' => '',
+                                'prev_text' => '&laquo;',
+                                'next_text' => '&raquo;',
+                                'total' => $total_pages,
+                                'current' => $current_page,
+                                'type' => 'plain'
+                            ));
+                            echo $page_links;
+                            ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <table class="wp-list-table widefat fixed striped">
+                        <thead>
+                            <tr>
+                                <td class="manage-column column-cb check-column">
+                                    <input type="checkbox" id="cb-select-all">
+                                </td>
+                                <th class="manage-column">Email Address</th>
+                                <th class="manage-column">Date Subscribed</th>
+                                <th class="manage-column">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($emails as $email): ?>
+                            <tr>
+                                <th class="check-column">
+                                    <input type="checkbox" name="emails[]" value="<?php echo $email->id; ?>">
+                                </th>
+                                <td><strong><?php echo esc_html($email->email); ?></strong></td>
+                                <td><?php echo date('M j, Y g:i A', strtotime($email->created_at)); ?></td>
+                                <td>
+                                    <a href="mailto:<?php echo esc_attr($email->email); ?>" class="button button-small">Email</a>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </form>
+            <?php endif; ?>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            // Select all checkbox functionality
+            $('#cb-select-all').on('change', function() {
+                $('input[name="emails[]"]').prop('checked', this.checked);
+            });
+            
+            // Export emails functionality
+            $('#export-emails').on('click', function(e) {
+                e.preventDefault();
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'export_emails',
+                        nonce: '<?php echo wp_create_nonce('export_emails_nonce'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            // Create download link
+                            var blob = new Blob([response.data], { type: 'text/csv' });
+                            var url = window.URL.createObjectURL(blob);
+                            var a = document.createElement('a');
+                            a.href = url;
+                            a.download = 'healthcare-email-subscribers-' + new Date().toISOString().split('T')[0] + '.csv';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(url);
+                        } else {
+                            alert('Export failed: ' + response.data);
+                        }
+                    },
+                    error: function() {
+                        alert('Export failed. Please try again.');
+                    }
+                });
+            });
+        });
+        </script>
+        <?php
+    }
+    
+    public function export_emails() {
+        check_ajax_referer('export_emails_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Insufficient permissions');
+        }
+        
+        global $wpdb;
+        $emails = $wpdb->get_results("SELECT email, created_at FROM $this->emails_table ORDER BY created_at DESC");
+        
+        // Create CSV content
+        $csv_content = "Email Address,Date Subscribed\n";
+        foreach ($emails as $email) {
+            $csv_content .= '"' . str_replace('"', '""', $email->email) . '","' . $email->created_at . "\"\n";
+        }
+        
+        wp_send_json_success($csv_content);
+    }
+    
+    // Security Functions
+    
+    public function block_dashboard_access() {
+        // Allow AJAX requests
+        if (wp_doing_ajax()) {
+            return;
+        }
+        
+        // Allow admin users
+        if (current_user_can('edit_posts')) {
+            return;
+        }
+        
+        // Block bookmark-only users from dashboard
+        if (is_user_logged_in()) {
+            $user_id = get_current_user_id();
+            $is_bookmark_user = get_user_meta($user_id, 'hb_bookmark_user', true);
+            
+            if ($is_bookmark_user) {
+                wp_safe_redirect(home_url());
+                exit;
+            }
+        }
+    }
+    
+    public function hide_admin_bar_for_bookmark_users() {
+        if (is_user_logged_in()) {
+            $user_id = get_current_user_id();
+            $is_bookmark_user = get_user_meta($user_id, 'hb_bookmark_user', true);
+            
+            if ($is_bookmark_user) {
+                show_admin_bar(false);
+            }
+        }
+    }
+    
+    private function get_user_ip() {
+        // Get real IP address, handling proxies and CDNs
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            return sanitize_text_field($_SERVER['HTTP_CF_CONNECTING_IP']); // Cloudflare
+        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            return sanitize_text_field(trim($ips[0])); // First IP in chain
+        } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            return sanitize_text_field($_SERVER['HTTP_X_REAL_IP']); // Nginx real IP
+        } else {
+            return sanitize_text_field($_SERVER['REMOTE_ADDR']); // Standard IP
+        }
+    }
+}
+
+// Initialize the plugin
+new HealthcareBookmarks();
+?>
