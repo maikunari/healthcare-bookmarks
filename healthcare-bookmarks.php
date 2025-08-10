@@ -3,7 +3,7 @@
  * Plugin Name: Healthcare Provider Bookmarks
  * Description: Magic link bookmarking system for healthcare providers with email capture
  * Version: 1.0.0
- * Author: maikunari
+ * Author: Your Name
  */
 
 // Prevent direct access
@@ -30,6 +30,8 @@ class HealthcareBookmarks {
         add_action('wp_ajax_get_bookmark_count', array($this, 'get_bookmark_count'));
         add_action('wp_ajax_nopriv_get_bookmark_count', array($this, 'get_bookmark_count'));
         add_action('wp_ajax_export_emails', array($this, 'export_emails'));
+        add_action('wp_ajax_send_bookmarks_access_link', array($this, 'send_bookmarks_access_link'));
+        add_action('wp_ajax_nopriv_send_bookmarks_access_link', array($this, 'send_bookmarks_access_link'));
         add_action('template_redirect', array($this, 'handle_magic_link'));
         add_action('admin_init', array($this, 'block_dashboard_access'));
         add_action('wp_before_admin_bar_render', array($this, 'hide_admin_bar_for_bookmark_users'));
@@ -272,6 +274,13 @@ class HealthcareBookmarks {
     }
     
     public function handle_magic_link() {
+        // Handle bookmark access links
+        if (isset($_GET['hb_access'])) {
+            $this->handle_bookmarks_access_link();
+            return;
+        }
+        
+        // Handle regular magic links
         if (!isset($_GET['hb_magic'])) {
             return;
         }
@@ -354,6 +363,34 @@ class HealthcareBookmarks {
         exit;
     }
     
+    private function handle_bookmarks_access_link() {
+        $token = sanitize_text_field($_GET['hb_access']);
+        $data = get_transient('hb_access_' . $token);
+        
+        if (!$data) {
+            wp_die('Invalid or expired access link.', 'Access Link Error', array('response' => 403));
+        }
+        
+        $user_id = $data['user_id'];
+        $user = get_user_by('id', $user_id);
+        
+        if (!$user) {
+            wp_die('User not found.', 'Access Link Error', array('response' => 404));
+        }
+        
+        // Log in user securely
+        wp_clear_auth_cookie();
+        wp_set_current_user($user->ID);
+        wp_set_auth_cookie($user->ID, false, is_ssl());
+        
+        // Delete used token immediately
+        delete_transient('hb_access_' . $token);
+        
+        // Redirect to current page (bookmarks page) without the access token
+        wp_safe_redirect(remove_query_arg('hb_access'));
+        exit;
+    }
+    
     public function toggle_bookmark() {
         check_ajax_referer('hb_nonce', 'nonce');
         
@@ -406,7 +443,8 @@ class HealthcareBookmarks {
     
     public function bookmarks_shortcode($atts) {
         if (!is_user_logged_in()) {
-            return '<p>Please log in to view your bookmarks.</p>';
+            // Show magic link login form for non-logged-in users
+            return $this->render_bookmarks_login_form();
         }
         
         $user_id = get_current_user_id();
@@ -456,6 +494,84 @@ class HealthcareBookmarks {
         $output .= '</div>';
         
         return $output;
+    }
+    
+    private function render_bookmarks_login_form() {
+        return '
+        <div class="hb-bookmarks-login">
+            <div class="hb-login-header">
+                <h2>Access Your Bookmarks</h2>
+                <p>Enter your email to view your saved healthcare providers.</p>
+            </div>
+            
+            <div class="hb-login-form">
+                <input type="email" id="hb-login-email" placeholder="your@email.com" />
+                <button id="hb-login-submit" class="hb-login-btn">Send Access Link</button>
+                <div class="hb-login-error" style="display: none;"></div>
+                <p class="hb-login-note">We\'ll send you a secure link to access your bookmarks instantly.</p>
+            </div>
+            
+            <div class="hb-login-help">
+                <h3>Don\'t have any bookmarks yet?</h3>
+                <p>Start building your personal healthcare directory by bookmarking providers that interest you.</p>
+                <a href="' . home_url() . '" class="hb-browse-btn">Browse Healthcare Providers →</a>
+            </div>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            $("#hb-login-submit").on("click", function() {
+                var email = $("#hb-login-email").val().trim();
+                var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                var button = $(this);
+                
+                if (!email) {
+                    showLoginError("Please enter your email address.");
+                    return;
+                }
+                
+                if (!emailRegex.test(email)) {
+                    showLoginError("Please enter a valid email address.");
+                    return;
+                }
+                
+                button.prop("disabled", true).text("Sending...");
+                
+                $.ajax({
+                    url: "' . admin_url('admin-ajax.php') . '",
+                    type: "POST",
+                    data: {
+                        action: "send_bookmarks_access_link",
+                        email: email,
+                        nonce: "' . wp_create_nonce('hb_bookmarks_access') . '"
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            $(".hb-login-form").html("<div class=\\"hb-success-message\\">✅ Access link sent! Check your email.</div>");
+                        } else {
+                            showLoginError(response.data);
+                            button.prop("disabled", false).text("Send Access Link");
+                        }
+                    },
+                    error: function() {
+                        showLoginError("Something went wrong. Please try again.");
+                        button.prop("disabled", false).text("Send Access Link");
+                    }
+                });
+            });
+            
+            $("#hb-login-email").on("keypress", function(e) {
+                if (e.which === 13) {
+                    $("#hb-login-submit").click();
+                }
+            });
+            
+            function showLoginError(message) {
+                $(".hb-login-error").text(message).show();
+                $("#hb-login-email").addClass("error");
+            }
+        });
+        </script>';
     }
     
     public function admin_menu() {
@@ -703,6 +819,76 @@ class HealthcareBookmarks {
         }
         
         wp_send_json_success($csv_content);
+    }
+    
+    public function send_bookmarks_access_link() {
+        check_ajax_referer('hb_bookmarks_access', 'nonce');
+        
+        $email = sanitize_email($_POST['email']);
+        
+        if (!is_email($email)) {
+            wp_send_json_error('Invalid email address');
+        }
+        
+        // Check if user exists
+        $user = get_user_by('email', $email);
+        
+        if (!$user) {
+            wp_send_json_error('No bookmarks found for this email address. Try bookmarking a provider first!');
+        }
+        
+        // Check if user has any bookmarks
+        global $wpdb;
+        $bookmark_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $this->table_name WHERE user_id = %d",
+            $user->ID
+        ));
+        
+        if ($bookmark_count == 0) {
+            wp_send_json_error('No bookmarks found for this email address. Try bookmarking a provider first!');
+        }
+        
+        // Rate limiting
+        $recent_attempt = get_transient('hb_access_rate_limit_' . md5($email));
+        if ($recent_attempt) {
+            wp_send_json_error('Please wait a moment before requesting another link');
+        }
+        set_transient('hb_access_rate_limit_' . md5($email), true, 2 * 60);
+        
+        // Generate magic link token
+        $token = wp_generate_password(32, false);
+        $expires = time() + (15 * 60); // 15 minutes
+        
+        set_transient('hb_access_' . $token, array(
+            'email' => $email,
+            'user_id' => $user->ID,
+            'expires' => $expires,
+            'ip' => $this->get_user_ip()
+        ), 15 * 60);
+        
+        $bookmarks_page = get_option('hb_bookmarks_page', home_url());
+        $magic_link = add_query_arg(array(
+            'hb_access' => $token
+        ), $bookmarks_page);
+        
+        // Send email
+        $subject = 'Access Your Healthcare Bookmarks';
+        $html_link = '<a href="' . esc_url($magic_link) . '" style="color: #007cba; text-decoration: none; font-weight: bold; padding: 12px 24px; background: #f0f8ff; border: 1px solid #007cba; border-radius: 4px; display: inline-block; margin: 10px 0;">View My Bookmarks</a>';
+        
+        $message = 'Access your saved healthcare providers:<br><br>' . $html_link . '<br><br>This link expires in 15 minutes.';
+        
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
+        );
+        
+        $sent = wp_mail($email, $subject, $message, $headers);
+        
+        if ($sent) {
+            wp_send_json_success('Access link sent! Check your email.');
+        } else {
+            wp_send_json_error('Failed to send email. Please try again.');
+        }
     }
     
     // Security Functions
