@@ -58,6 +58,65 @@
     fill: currentColor;
 }
 
+/* Appointment Button Styles (looks like bookmark but no JS events) */
+.hb-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+}
+
+.hb-action-btn .hb-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hb-action-btn .hb-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.hb-appointment-btn {
+    background: #00d084 !important;
+    border: 1px solid #00b56a !important;
+    color: white !important;
+}
+
+.hb-appointment-btn:hover {
+    background: #00b56a !important;
+    color: white !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-decoration: none;
+}
+
+/* Container for both buttons */
+.hb-action-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+    .hb-action-buttons {
+        flex-direction: column;
+    }
+}
+
 .hb-counter {
     display: inline-flex;
     align-items: center;
