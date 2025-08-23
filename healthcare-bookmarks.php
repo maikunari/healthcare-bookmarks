@@ -58,6 +58,7 @@ class HealthcareBookmarks {
             user_id bigint(20) NOT NULL,
             post_id bigint(20) NOT NULL,
             city varchar(100) DEFAULT NULL,
+            specialties text DEFAULT NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY user_post (user_id, post_id)
@@ -68,6 +69,7 @@ class HealthcareBookmarks {
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             email varchar(100) NOT NULL,
             cities text DEFAULT NULL,
+            specialties text DEFAULT NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY email (email)
@@ -219,20 +221,22 @@ class HealthcareBookmarks {
         // Set rate limit (1 email per 2 minutes per email address)
         set_transient('hb_rate_limit_' . md5($email), true, 2 * 60);
         
-        // Get city from the post
+        // Get city and specialties from the post
         $city = $this->get_post_city($post_id);
+        $specialties = $this->get_post_specialties($post_id);
         
         // Store email with consent flag
         global $wpdb;
         $wpdb->replace($this->emails_table, array(
             'email' => $email,
             'cities' => $city ? json_encode(array($city)) : null,
+            'specialties' => !empty($specialties) ? json_encode($specialties) : null,
             'created_at' => current_time('mysql')
         ));
         
-        // Send to ConvertKit if enabled with city tag
+        // Send to ConvertKit if enabled with city and specialty tags
         $cities = $city ? array($city) : array();
-        $this->add_to_convertkit($email, $cities);
+        $this->add_to_convertkit($email, $cities, $specialties);
         
         // Generate secure magic link token
         $token = wp_generate_password(32, false);
@@ -357,18 +361,21 @@ class HealthcareBookmarks {
         wp_set_current_user($user->ID);
         wp_set_auth_cookie($user->ID, false, is_ssl()); // Secure cookie if SSL
         
-        // Add bookmark with city
+        // Add bookmark with city and specialties
         $city = $this->get_post_city($post_id);
+        $specialties = $this->get_post_specialties($post_id);
         global $wpdb;
         $result = $wpdb->replace($this->table_name, array(
             'user_id' => $user->ID,
             'post_id' => $post_id,
             'city' => $city,
+            'specialties' => !empty($specialties) ? json_encode($specialties) : null,
             'created_at' => current_time('mysql')
         ));
         
-        // Update user's city list
+        // Update user's city and specialty lists
         $this->update_user_cities($email, $city);
+        $this->update_user_specialties($email, $specialties);
         
         if ($result === false) {
             wp_die('Failed to save bookmark.', 'Bookmark Error', array('response' => 500));
@@ -436,19 +443,22 @@ class HealthcareBookmarks {
             ));
             wp_send_json_success(array('action' => 'removed', 'bookmarked' => false));
         } else {
-            // Add bookmark with city
+            // Add bookmark with city and specialties
             $city = $this->get_post_city($post_id);
+            $specialties = $this->get_post_specialties($post_id);
             $wpdb->insert($this->table_name, array(
                 'user_id' => $user_id,
                 'post_id' => $post_id,
                 'city' => $city,
+                'specialties' => !empty($specialties) ? json_encode($specialties) : null,
                 'created_at' => current_time('mysql')
             ));
             
-            // Update user's city list
+            // Update user's city and specialty lists
             $user = get_user_by('id', $user_id);
             if ($user) {
                 $this->update_user_cities($user->user_email, $city);
+                $this->update_user_specialties($user->user_email, $specialties);
             }
             
             wp_send_json_success(array('action' => 'added', 'bookmarked' => true));
@@ -630,6 +640,7 @@ class HealthcareBookmarks {
             update_option('hb_convertkit_form_id', sanitize_text_field($_POST['convertkit_form_id']));
             update_option('hb_convertkit_enabled', isset($_POST['convertkit_enabled']) ? true : false);
             update_option('hb_convertkit_city_tag_format', sanitize_text_field($_POST['convertkit_city_tag_format']));
+            update_option('hb_convertkit_specialty_tag_format', sanitize_text_field($_POST['convertkit_specialty_tag_format']));
             echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
         }
         
@@ -640,6 +651,7 @@ class HealthcareBookmarks {
         $convertkit_form_id = get_option('hb_convertkit_form_id', '');
         $convertkit_enabled = get_option('hb_convertkit_enabled', false);
         $convertkit_city_tag_format = get_option('hb_convertkit_city_tag_format', 'city_prefix');
+        $convertkit_specialty_tag_format = get_option('hb_convertkit_specialty_tag_format', 'specialty_prefix');
         
         global $wpdb;
         $email_count = $wpdb->get_var("SELECT COUNT(*) FROM $this->emails_table");
@@ -713,6 +725,16 @@ class HealthcareBookmarks {
                                 <option value="city_only" <?php selected($convertkit_city_tag_format, 'city_only'); ?>>City name only (e.g., "San Francisco")</option>
                             </select>
                             <p class="description">How city tags should be formatted in ConvertKit</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Specialty Tag Format</th>
+                        <td>
+                            <select name="convertkit_specialty_tag_format">
+                                <option value="specialty_prefix" <?php selected($convertkit_specialty_tag_format, 'specialty_prefix'); ?>>With prefix (e.g., "Specialty: Cardiology")</option>
+                                <option value="specialty_only" <?php selected($convertkit_specialty_tag_format, 'specialty_only'); ?>>Specialty name only (e.g., "Cardiology")</option>
+                            </select>
+                            <p class="description">How specialty tags should be formatted in ConvertKit</p>
                         </td>
                     </tr>
                 </table>
@@ -815,6 +837,7 @@ class HealthcareBookmarks {
                                 </td>
                                 <th class="manage-column">Email Address</th>
                                 <th class="manage-column">Cities</th>
+                                <th class="manage-column">Specialties</th>
                                 <th class="manage-column">Date Subscribed</th>
                                 <th class="manage-column">Actions</th>
                             </tr>
@@ -833,6 +856,16 @@ class HealthcareBookmarks {
                                         echo esc_html(implode(', ', $cities));
                                     } else {
                                         echo '<em>No cities tracked</em>';
+                                    }
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php 
+                                    if ($email->specialties) {
+                                        $specialties = json_decode($email->specialties, true);
+                                        echo esc_html(implode(', ', $specialties));
+                                    } else {
+                                        echo '<em>No specialties tracked</em>';
                                     }
                                     ?>
                                 </td>
@@ -1082,39 +1115,27 @@ class HealthcareBookmarks {
     // Helper Functions
     
     private function get_post_city($post_id) {
-        // Try to get city from custom field first
-        $city = get_post_meta($post_id, 'city', true);
+        // Get city from the 'location' taxonomy
+        $terms = wp_get_post_terms($post_id, 'location', array('fields' => 'names'));
         
-        // If no custom field, try to extract from address field
-        if (!$city) {
-            $city = get_post_meta($post_id, 'location_city', true);
+        if (!empty($terms) && !is_wp_error($terms)) {
+            // Return the first location term as the city
+            return sanitize_text_field($terms[0]);
         }
         
-        // If still no city, try to extract from a location/address field
-        if (!$city) {
-            $address = get_post_meta($post_id, 'address', true);
-            if (!$address) {
-                $address = get_post_meta($post_id, 'location', true);
-            }
-            
-            // Simple extraction: look for city before state abbreviation
-            if ($address) {
-                // Match pattern like "City, ST" or "City ST"
-                if (preg_match('/([A-Za-z\s]+)(?:,?\s+)([A-Z]{2})\s+\d{5}/', $address, $matches)) {
-                    $city = trim($matches[1]);
-                }
-            }
+        return '';
+    }
+    
+    private function get_post_specialties($post_id) {
+        // Get specialties from the 'specialties' taxonomy
+        $terms = wp_get_post_terms($post_id, 'specialties', array('fields' => 'names'));
+        
+        if (!empty($terms) && !is_wp_error($terms)) {
+            // Return all specialties as an array
+            return array_map('sanitize_text_field', $terms);
         }
         
-        // If still no city, check post categories or tags for location info
-        if (!$city) {
-            $terms = wp_get_post_terms($post_id, array('location', 'city', 'healthcare_location'), array('fields' => 'names'));
-            if (!empty($terms)) {
-                $city = $terms[0];
-            }
-        }
-        
-        return $city ? sanitize_text_field($city) : '';
+        return array();
     }
     
     private function update_user_cities($email, $city) {
@@ -1139,9 +1160,36 @@ class HealthcareBookmarks {
         }
     }
     
+    private function update_user_specialties($email, $specialties) {
+        if (empty($specialties)) return;
+        
+        global $wpdb;
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT specialties FROM $this->emails_table WHERE email = %s",
+            $email
+        ));
+        
+        if ($existing) {
+            $existing_specialties = $existing->specialties ? json_decode($existing->specialties, true) : array();
+            
+            // Merge new specialties with existing ones
+            foreach ($specialties as $specialty) {
+                if (!in_array($specialty, $existing_specialties)) {
+                    $existing_specialties[] = $specialty;
+                }
+            }
+            
+            $wpdb->update(
+                $this->emails_table,
+                array('specialties' => json_encode($existing_specialties)),
+                array('email' => $email)
+            );
+        }
+    }
+    
     // ConvertKit Integration Functions
     
-    private function add_to_convertkit($email, $cities = array()) {
+    private function add_to_convertkit($email, $cities = array(), $specialties = array()) {
         if (!get_option('hb_convertkit_enabled')) {
             return false;
         }
@@ -1153,8 +1201,10 @@ class HealthcareBookmarks {
             return false;
         }
         
-        // Prepare tags for cities
+        // Prepare tags for cities and specialties
         $tags = array();
+        
+        // Add city tags
         if (!empty($cities)) {
             foreach ($cities as $city) {
                 // Create tag like "City: San Francisco" or just city name based on settings
@@ -1163,6 +1213,19 @@ class HealthcareBookmarks {
                     $tags[] = 'City: ' . $city;
                 } else {
                     $tags[] = $city;
+                }
+            }
+        }
+        
+        // Add specialty tags
+        if (!empty($specialties)) {
+            foreach ($specialties as $specialty) {
+                // Create tag like "Specialty: Cardiology" or just specialty name based on settings
+                $tag_format = get_option('hb_convertkit_specialty_tag_format', 'specialty_prefix');
+                if ($tag_format === 'specialty_prefix') {
+                    $tags[] = 'Specialty: ' . $specialty;
+                } else {
+                    $tags[] = $specialty;
                 }
             }
         }
@@ -1217,7 +1280,7 @@ class HealthcareBookmarks {
         }
         
         global $wpdb;
-        $emails = $wpdb->get_results("SELECT email, cities FROM $this->emails_table", ARRAY_A);
+        $emails = $wpdb->get_results("SELECT email, cities, specialties FROM $this->emails_table", ARRAY_A);
         
         $total = count($emails);
         $success = 0;
@@ -1225,7 +1288,8 @@ class HealthcareBookmarks {
         
         foreach ($emails as $row) {
             $cities = $row['cities'] ? json_decode($row['cities'], true) : array();
-            if ($this->add_to_convertkit($row['email'], $cities)) {
+            $specialties = $row['specialties'] ? json_decode($row['specialties'], true) : array();
+            if ($this->add_to_convertkit($row['email'], $cities, $specialties)) {
                 $success++;
             } else {
                 $failed++;
