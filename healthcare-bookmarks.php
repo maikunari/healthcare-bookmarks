@@ -1,15 +1,28 @@
 <?php
 /**
  * Plugin Name: Healthcare Provider Bookmarks
- * Description: Magic link bookmarking system for healthcare providers with email capture
- * Version: 1.0.0
+ * Description: Magic link bookmarking system for healthcare providers with email capture and ConvertKit integration
+ * Version: 1.1.0
  * Author: Your Name
+ * License: GPL v2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain: healthcare-bookmarks
+ * Domain Path: /languages
+ * Requires at least: 5.0
+ * Tested up to: 6.4
+ * Requires PHP: 7.0
  */
 
 // Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
 }
+
+// Define plugin constants
+define('HB_PLUGIN_VERSION', '1.1.0');
+define('HB_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('HB_PLUGIN_PATH', plugin_dir_path(__FILE__));
+define('HB_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 class HealthcareBookmarks {
     
@@ -22,6 +35,7 @@ class HealthcareBookmarks {
         $this->emails_table = $wpdb->prefix . 'healthcare_emails';
         
         add_action('init', array($this, 'init'));
+        add_action('plugins_loaded', array($this, 'load_textdomain'));
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('wp_ajax_send_magic_link', array($this, 'send_magic_link'));
@@ -45,6 +59,14 @@ class HealthcareBookmarks {
     
     public function init() {
         // Initialize plugin
+    }
+    
+    public function load_textdomain() {
+        load_plugin_textdomain(
+            'healthcare-bookmarks',
+            false,
+            dirname(HB_PLUGIN_BASENAME) . '/languages'
+        );
     }
     
     public function create_tables() {
@@ -88,19 +110,23 @@ class HealthcareBookmarks {
     }
     
     public function enqueue_scripts() {
+        // Use file modification time for cache busting
+        $js_version = filemtime(HB_PLUGIN_PATH . 'assets/bookmarks.js');
+        $css_version = filemtime(HB_PLUGIN_PATH . 'assets/bookmarks.css');
+        
         wp_enqueue_script(
             'healthcare-bookmarks',
-            plugin_dir_url(__FILE__) . 'assets/bookmarks.js',
+            HB_PLUGIN_URL . 'assets/bookmarks.js',
             array('jquery'),
-            '1.0.0',
+            $js_version,
             true
         );
         
         wp_enqueue_style(
             'healthcare-bookmarks',
-            plugin_dir_url(__FILE__) . 'assets/bookmarks.css',
+            HB_PLUGIN_URL . 'assets/bookmarks.css',
             array(),
-            '1.0.0'
+            $css_version
         );
         
         wp_localize_script('healthcare-bookmarks', 'hb_ajax', array(
@@ -111,11 +137,12 @@ class HealthcareBookmarks {
     
     public function register_blocks() {
         // Bookmark Button Block
+        $button_block_path = HB_PLUGIN_PATH . 'blocks/bookmark-button.js';
         wp_register_script(
             'hb-bookmark-button-block',
-            plugin_dir_url(__FILE__) . 'blocks/bookmark-button.js',
+            HB_PLUGIN_URL . 'blocks/bookmark-button.js',
             array('wp-blocks', 'wp-element', 'wp-editor'),
-            '1.0.0'
+            file_exists($button_block_path) ? filemtime($button_block_path) : '1.1.0'
         );
         
         register_block_type('healthcare-bookmarks/bookmark-button', array(
@@ -124,11 +151,12 @@ class HealthcareBookmarks {
         ));
         
         // Bookmark Counter Block
+        $counter_block_path = HB_PLUGIN_PATH . 'blocks/bookmark-counter.js';
         wp_register_script(
             'hb-bookmark-counter-block',
-            plugin_dir_url(__FILE__) . 'blocks/bookmark-counter.js',
+            HB_PLUGIN_URL . 'blocks/bookmark-counter.js',
             array('wp-blocks', 'wp-element', 'wp-editor'),
-            '1.0.0'
+            file_exists($counter_block_path) ? filemtime($counter_block_path) : '1.1.0'
         );
         
         register_block_type('healthcare-bookmarks/bookmark-counter', array(
@@ -156,7 +184,7 @@ class HealthcareBookmarks {
         }
         
         $icon_class = $is_bookmarked ? 'hb-bookmarked' : 'hb-not-bookmarked';
-        $button_text = $is_bookmarked ? 'Bookmarked' : 'Bookmark';
+        $button_text = $is_bookmarked ? __('Bookmarked', 'healthcare-bookmarks') : __('Bookmark', 'healthcare-bookmarks');
         
         // Feather bookmark SVG icon
         $bookmark_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg>';
@@ -166,10 +194,13 @@ class HealthcareBookmarks {
                 <span class="hb-icon">%s</span>
                 <span class="hb-text">%s</span>
             </button>',
-            $icon_class,
-            $post->ID,
-            $bookmark_svg,
-            $button_text
+            esc_attr($icon_class),
+            esc_attr($post->ID),
+            wp_kses($bookmark_svg, array(
+                'svg' => array('xmlns' => true, 'width' => true, 'height' => true, 'viewBox' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true),
+                'path' => array('d' => true)
+            )),
+            esc_html($button_text)
         );
     }
     
@@ -193,12 +224,15 @@ class HealthcareBookmarks {
         return sprintf(
             '<a href="%s" class="hb-counter">
                 <span class="hb-counter-icon">%s</span>
-                <span class="hb-counter-text">My Bookmarks</span>
+                <span class="hb-counter-text">' . __('My Bookmarks', 'healthcare-bookmarks') . '</span>
                 <span class="hb-counter-number">%d</span>
             </a>',
-            $bookmarks_page,
-            $bookmark_svg,
-            $count
+            esc_url($bookmarks_page),
+            wp_kses($bookmark_svg, array(
+                'svg' => array('xmlns' => true, 'width' => true, 'height' => true, 'viewBox' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true),
+                'path' => array('d' => true)
+            )),
+            esc_html($count)
         );
     }
     
@@ -209,13 +243,13 @@ class HealthcareBookmarks {
         $post_id = intval($_POST['post_id']);
         
         if (!is_email($email) || !$post_id) {
-            wp_send_json_error('Invalid email or post ID');
+            wp_send_json_error(__('Invalid email or post ID', 'healthcare-bookmarks'));
         }
         
         // Rate limiting: Check if email was sent recently (prevent spam)
         $recent_attempt = get_transient('hb_rate_limit_' . md5($email));
         if ($recent_attempt) {
-            wp_send_json_error('Please wait a moment before requesting another link');
+            wp_send_json_error(__('Please wait a moment before requesting another link', 'healthcare-bookmarks'));
         }
         
         // Set rate limit (1 email per 2 minutes per email address)
@@ -286,9 +320,12 @@ class HealthcareBookmarks {
         $sent = wp_mail($email, $subject, $message, $headers);
         
         if ($sent) {
-            wp_send_json_success('Magic link sent! Check your email.');
+            // Ensure proper JSON response format
+            wp_send_json_success(__('Magic link sent! Check your email.', 'healthcare-bookmarks'));
+            exit; // Make sure script stops here
         } else {
-            wp_send_json_error('Failed to send email. Please try again.');
+            wp_send_json_error(__('Failed to send email. Please try again.', 'healthcare-bookmarks'));
+            exit; // Make sure script stops here
         }
     }
     
@@ -495,7 +532,7 @@ class HealthcareBookmarks {
         ));
         
         if (empty($bookmarks)) {
-            return '<div class="hb-bookmarks-empty"><h3>No bookmarks yet</h3><p>You haven\'t bookmarked any healthcare providers yet.</p></div>';
+            return '<div class="hb-bookmarks-empty"><h3>' . __('No bookmarks yet', 'healthcare-bookmarks') . '</h3><p>' . __('You haven\'t bookmarked any healthcare providers yet.', 'healthcare-bookmarks') . '</p></div>';
         }
         
         $output = '<div class="hb-bookmarks-grid">';
@@ -522,11 +559,11 @@ class HealthcareBookmarks {
                     </div>
                 </div>',
                 $thumbnail ?: '<div class="hb-no-image">No Image</div>',
-                $permalink,
-                $title,
-                $excerpt,
-                $permalink,
-                $post->ID
+                esc_url($permalink),
+                esc_html($title),
+                esc_html($excerpt),
+                esc_url($permalink),
+                esc_attr($post->ID)
             );
         }
         
@@ -536,11 +573,26 @@ class HealthcareBookmarks {
     }
     
     private function render_bookmarks_login_form() {
+        // Enqueue the login script
+        wp_enqueue_script(
+            'hb-bookmarks-login',
+            HB_PLUGIN_URL . 'assets/bookmarks-login.js',
+            array('jquery'),
+            filemtime(HB_PLUGIN_PATH . 'assets/bookmarks-login.js'),
+            true
+        );
+        
+        // Localize script with secure data
+        wp_localize_script('hb-bookmarks-login', 'hb_login_ajax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('hb_bookmarks_access')
+        ));
+        
         return '
         <div class="hb-bookmarks-login">
             <div class="hb-login-header">
-                <h2>Access Your Bookmarks</h2>
-                <p>Enter your email to view your saved healthcare providers.</p>
+                <h2>' . __('Access Your Bookmarks', 'healthcare-bookmarks') . '</h2>
+                <p>' . __('Enter your email to view your saved healthcare providers.', 'healthcare-bookmarks') . '</p>
             </div>
             
             <div class="hb-login-form">
@@ -551,66 +603,11 @@ class HealthcareBookmarks {
             </div>
             
             <div class="hb-login-help">
-                <h3>Don\'t have any bookmarks yet?</h3>
-                <p>Start building your personal healthcare directory by bookmarking providers that interest you.</p>
-                <a href="' . home_url() . '" class="hb-browse-btn">Browse Healthcare Providers →</a>
+                <h3>' . __('Don\'t have any bookmarks yet?', 'healthcare-bookmarks') . '</h3>
+                <p>' . __('Start building your personal healthcare directory by bookmarking providers that interest you.', 'healthcare-bookmarks') . '</p>
+                <a href="' . esc_url(home_url()) . '" class="hb-browse-btn">Browse Healthcare Providers →</a>
             </div>
-        </div>
-        
-        <script>
-        jQuery(document).ready(function($) {
-            $("#hb-login-submit").on("click", function() {
-                var email = $("#hb-login-email").val().trim();
-                var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                var button = $(this);
-                
-                if (!email) {
-                    showLoginError("Please enter your email address.");
-                    return;
-                }
-                
-                if (!emailRegex.test(email)) {
-                    showLoginError("Please enter a valid email address.");
-                    return;
-                }
-                
-                button.prop("disabled", true).text("Sending...");
-                
-                $.ajax({
-                    url: "' . admin_url('admin-ajax.php') . '",
-                    type: "POST",
-                    data: {
-                        action: "send_bookmarks_access_link",
-                        email: email,
-                        nonce: "' . wp_create_nonce('hb_bookmarks_access') . '"
-                    },
-                    success: function(response) {
-                        if (response.success) {
-                            $(".hb-login-form").html("<div class=\\"hb-login-success\\"><h3>✅ Access Link Sent!</h3><p>Check your email and click the link to view your bookmarks.</p></div>");
-                        } else {
-                            showLoginError(response.data);
-                            button.prop("disabled", false).text("Send Access Link");
-                        }
-                    },
-                    error: function() {
-                        showLoginError("Something went wrong. Please try again.");
-                        button.prop("disabled", false).text("Send Access Link");
-                    }
-                });
-            });
-            
-            $("#hb-login-email").on("keypress", function(e) {
-                if (e.which === 13) {
-                    $("#hb-login-submit").click();
-                }
-            });
-            
-            function showLoginError(message) {
-                $(".hb-login-error").text(message).show();
-                $("#hb-login-email").addClass("error");
-            }
-        });
-        </script>';
+        </div>';
     }
     
     public function admin_menu() {
@@ -632,7 +629,13 @@ class HealthcareBookmarks {
     }
     
     public function admin_page() {
+        // Handle form submission with nonce verification
         if (isset($_POST['submit'])) {
+            // Verify nonce
+            if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'], 'hb_settings_nonce')) {
+                wp_die(__('Security check failed', 'healthcare-bookmarks'));
+            }
+            
             update_option('hb_email_subject', sanitize_text_field($_POST['email_subject']));
             update_option('hb_email_message', sanitize_textarea_field($_POST['email_message']));
             update_option('hb_bookmarks_page', esc_url($_POST['bookmarks_page']));
@@ -641,7 +644,7 @@ class HealthcareBookmarks {
             update_option('hb_convertkit_enabled', isset($_POST['convertkit_enabled']) ? true : false);
             update_option('hb_convertkit_city_tag_format', sanitize_text_field($_POST['convertkit_city_tag_format']));
             update_option('hb_convertkit_specialty_tag_format', sanitize_text_field($_POST['convertkit_specialty_tag_format']));
-            echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+            echo '<div class="notice notice-success"><p>' . __('Settings saved!', 'healthcare-bookmarks') . '</p></div>';
         }
         
         $email_subject = get_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
@@ -668,6 +671,7 @@ class HealthcareBookmarks {
             </div>
             
             <form method="post">
+                <?php wp_nonce_field('hb_settings_nonce'); ?>
                 <table class="form-table">
                     <tr>
                         <th scope="row">Magic Link Email Subject</th>
@@ -756,15 +760,31 @@ class HealthcareBookmarks {
     public function emails_page() {
         global $wpdb;
         
-        // Handle bulk actions
+        // Handle bulk actions with nonce verification
         if (isset($_POST['action']) && $_POST['action'] === 'delete_selected' && isset($_POST['emails'])) {
+            // Verify nonce for bulk actions
+            if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'], 'bulk_delete_emails')) {
+                wp_die(__('Security check failed', 'healthcare-bookmarks'));
+            }
+            
             $email_ids = array_map('intval', $_POST['emails']);
-            $placeholders = implode(',', array_fill(0, count($email_ids), '%d'));
-            $wpdb->query($wpdb->prepare(
-                "DELETE FROM $this->emails_table WHERE id IN ($placeholders)",
-                $email_ids
-            ));
-            echo '<div class="notice notice-success"><p>Selected emails deleted successfully.</p></div>';
+            
+            // Secure deletion - use individual deletes to avoid SQL injection
+            $deleted = 0;
+            foreach ($email_ids as $id) {
+                if ($id > 0) {  // Ensure positive integer
+                    $result = $wpdb->delete(
+                        $this->emails_table,
+                        array('id' => $id),
+                        array('%d')
+                    );
+                    if ($result) $deleted++;
+                }
+            }
+            
+            if ($deleted > 0) {
+                echo '<div class="notice notice-success"><p>' . esc_html(sprintf('%d email(s) deleted successfully.', $deleted)) . '</p></div>';
+            }
         }
         
         // Pagination
@@ -801,6 +821,7 @@ class HealthcareBookmarks {
                 <p>No email subscribers yet.</p>
             <?php else: ?>
                 <form method="post">
+                    <?php wp_nonce_field('bulk_delete_emails'); ?>
                     <div class="tablenav top">
                         <div class="alignleft actions bulkactions">
                             <select name="action">
@@ -1008,7 +1029,7 @@ class HealthcareBookmarks {
         // Rate limiting
         $recent_attempt = get_transient('hb_access_rate_limit_' . md5($email));
         if ($recent_attempt) {
-            wp_send_json_error('Please wait a moment before requesting another link');
+            wp_send_json_error(__('Please wait a moment before requesting another link', 'healthcare-bookmarks'));
         }
         set_transient('hb_access_rate_limit_' . md5($email), true, 2 * 60);
         
@@ -1044,7 +1065,7 @@ class HealthcareBookmarks {
         if ($sent) {
             wp_send_json_success('Access link sent! Check your email.');
         } else {
-            wp_send_json_error('Failed to send email. Please try again.');
+            wp_send_json_error(__('Failed to send email. Please try again.', 'healthcare-bookmarks'));
         }
     }
     

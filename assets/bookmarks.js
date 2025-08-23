@@ -15,6 +15,7 @@ jQuery(document).ready(function($) {
                 $.ajax({
                     url: hb_ajax.ajax_url,
                     type: 'POST',
+                    dataType: 'json',
                     data: {
                         action: 'send_magic_link',
                         email: email,
@@ -22,15 +23,20 @@ jQuery(document).ready(function($) {
                         nonce: hb_ajax.nonce
                     },
                     success: function(response) {
-                        if (response.success) {
-                            showSuccessMessage(response.data);
+                        if (response && response.success) {
+                            showSuccessMessage(response.data || 'Magic link sent! Check your email.');
                         } else {
-                            showErrorMessage('Error: ' + response.data);
+                            showErrorMessage(response.data || 'Error sending magic link. Please try again.');
                         }
                         button.prop('disabled', false).find('.hb-text').text('Bookmark');
                     },
-                    error: function() {
-                        showErrorMessage('Error sending magic link. Please try again.');
+                    error: function(xhr, status, error) {
+                        // Check if email was actually sent successfully despite error
+                        if (xhr.responseText && xhr.responseText.includes('Magic link sent')) {
+                            showSuccessMessage('Magic link sent! Check your email.');
+                        } else {
+                            showErrorMessage('Error sending magic link. Please try again.');
+                        }
                         button.prop('disabled', false).find('.hb-text').text('Bookmark');
                     }
                 });

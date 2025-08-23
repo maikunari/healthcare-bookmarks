@@ -1,60 +1,149 @@
-# Healthcare Provider Bookmarks
+# Healthcare Provider Bookmarks Plugin
 
-A WordPress plugin that provides magic link bookmarking functionality for healthcare providers with email capture for marketing.
+A WordPress plugin that enables users to bookmark healthcare providers with magic link authentication and advanced email marketing capabilities through ConvertKit integration.
 
 ## Features
 
-- 🔗 Magic link authentication (passwordless login)
-- 📧 Email capture for marketing campaigns
-- 🏥 Healthcare provider specific bookmarking
-- 📱 Mobile responsive design
-- 🎨 Gutenberg blocks for easy integration
-- 📊 Admin dashboard with statistics
-- ⚡ AJAX-powered interactions
+### Core Functionality
+- 🔗 **Magic Link Authentication**: Passwordless login system via email
+- 📑 **Bookmark Management**: Users can save their favorite healthcare providers
+- 📧 **Email Capture**: Collect emails with marketing consent
+- 📍 **Location Tracking**: Automatically track user interests by city
+- 🏥 **Specialty Tracking**: Track medical specialties of interest
+- 🚀 **ConvertKit Integration**: Seamlessly sync subscribers with advanced tagging
+
+### Marketing Capabilities
+- **Geographic Segmentation**: Track which cities users are interested in
+- **Specialty Segmentation**: Track medical specialties (Cardiology, Pediatrics, etc.)
+- **Automatic Tagging**: Apply tags in ConvertKit based on user behavior
+- **Bulk Sync**: Sync existing email list to ConvertKit with all tags
+- **Interest Accumulation**: Build comprehensive user profiles over time
 
 ## Installation
 
-1. Download or clone this repository
-2. Upload the `healthcare-bookmarks` folder to `/wp-content/plugins/`
-3. Activate the plugin through the 'Plugins' menu in WordPress
-4. Configure settings at **Settings → Healthcare Bookmarks**
+1. Upload the plugin folder to `/wp-content/plugins/`
+2. Activate the plugin through the 'Plugins' menu in WordPress
+3. Configure settings at Settings → Healthcare Bookmarks
 
-## Setup Guide
+## Configuration
 
-### 1. Configure Plugin Settings
-- Go to **Settings → Healthcare Bookmarks**
-- Customize email templates for magic links
-- Set your "My Bookmarks" page URL
+### Basic Setup
 
-### 2. Create My Bookmarks Page
-- Create a new page (e.g., "My Bookmarks")
-- Add the shortcode: `[healthcare_bookmarks]`
-- Save and note the page URL for settings
+1. **Create a Bookmarks Page**:
+   - Create a new page in WordPress
+   - Add the shortcode `[healthcare_bookmarks]`
+   - Save the page URL in plugin settings
 
-### 3. Add Blocks to Your Site
+2. **Add Bookmark Buttons**:
+   - Edit your healthcare provider posts/pages
+   - Add the "Healthcare Bookmark Button" Gutenberg block
+   - The button will automatically appear on provider pages
 
-#### Bookmark Button Block
-- Edit any healthcare provider post
-- Add the "Healthcare Bookmark Button" block
-- Only displays on `healthcare_provider` post type
+3. **Add Bookmark Counter** (Optional):
+   - Edit your site header/navigation
+   - Add the "Healthcare Bookmark Counter" block
+   - Links to your bookmarks page and shows count
 
-#### Bookmark Counter Block  
-- Edit your header template or navigation area
-- Add the "Healthcare Bookmark Counter" block
-- Shows bookmark count and links to My Bookmarks page
+### ConvertKit Integration Setup
+
+1. **Get Your ConvertKit Credentials**:
+   - Log into your Kit.com account
+   - Navigate to Account Settings → Advanced
+   - Copy your API Key
+   - Go to your desired form and copy the Form ID
+
+2. **Configure in WordPress**:
+   - Go to Settings → Healthcare Bookmarks
+   - Scroll to "ConvertKit Integration" section
+   - Check "Enable ConvertKit"
+   - Enter your API Key
+   - Enter your Form ID
+   - Choose tag formats:
+     - **Cities**: "City: San Francisco" or "San Francisco"
+     - **Specialties**: "Specialty: Cardiology" or "Cardiology"
+   - Save settings
+
+3. **Sync Existing Subscribers** (Optional):
+   - Go to Tools → Email Subscribers
+   - Click "Sync to ConvertKit"
+   - Confirm the action
+   - Wait for sync to complete
 
 ## Usage
 
-### For Visitors (Not Logged In)
-1. Click bookmark button on healthcare provider
-2. Enter email address
-3. Check email for magic link
-4. Click magic link to auto-login and bookmark
+### For Site Visitors
 
-### For Logged In Users
-1. Click bookmark button to instantly bookmark
-2. View bookmarks via header counter or My Bookmarks page
-3. Remove bookmarks from My Bookmarks page
+1. **Bookmarking Without Account**:
+   - Click bookmark button on any healthcare provider
+   - Enter email address
+   - Check email for magic link (expires in 15 minutes)
+   - Click link to confirm bookmark (creates account automatically)
+
+2. **Accessing Bookmarks**:
+   - Visit the bookmarks page
+   - Enter email address
+   - Click magic link in email
+   - View and manage saved providers
+
+### For Administrators
+
+1. **View Email Subscribers**:
+   - Navigate to Tools → Email Subscribers
+   - View all collected emails with their interests:
+     - Cities they're interested in
+     - Medical specialties they've bookmarked
+   - Export as CSV for backup
+   - Sync to ConvertKit as needed
+
+2. **Monitor Statistics**:
+   - Check Settings → Healthcare Bookmarks for totals
+   - View bookmark count and email subscriber count
+
+## ConvertKit Segmentation Examples
+
+With automatic tagging, you can create powerful segments in ConvertKit:
+
+### Geographic Campaigns
+- Users interested in "San Francisco" providers
+- Multi-city campaigns (users interested in "SF" OR "LA")
+- Regional healthcare announcements
+
+### Specialty-Based Campaigns
+- Users interested in "Cardiology"
+- Multiple specialty interests (e.g., "Pediatrics" AND "Family Medicine")
+- Specialty-specific health tips and news
+
+### Compound Segments
+- "Pediatrics" providers in "Los Angeles"
+- "Cardiology" OR "Internal Medicine" in "San Diego"
+- Emergency services in specific cities
+
+## Requirements
+
+- WordPress 5.0 or higher
+- PHP 7.0 or higher
+- `healthcare_provider` custom post type
+- `location` taxonomy (for cities)
+- `specialties` taxonomy (for medical specialties)
+
+## Database Tables
+
+The plugin creates two custom tables:
+
+### wp_healthcare_bookmarks
+- `id` - Unique bookmark ID
+- `user_id` - WordPress user ID
+- `post_id` - Healthcare provider post ID
+- `city` - City from location taxonomy
+- `specialties` - JSON array of specialties
+- `created_at` - Timestamp
+
+### wp_healthcare_emails
+- `id` - Unique record ID
+- `email` - Email address
+- `cities` - JSON array of all cities of interest
+- `specialties` - JSON array of all specialties of interest
+- `created_at` - Timestamp
 
 ## File Structure
 
@@ -62,6 +151,7 @@ A WordPress plugin that provides magic link bookmarking functionality for health
 healthcare-bookmarks/
 ├── healthcare-bookmarks.php    # Main plugin file
 ├── README.md                   # This file
+├── CLAUDE.md                   # Developer documentation
 ├── assets/
 │   ├── bookmarks.js           # Frontend JavaScript
 │   └── bookmarks.css          # Plugin styles
@@ -70,146 +160,114 @@ healthcare-bookmarks/
     └── bookmark-counter.js    # Counter block
 ```
 
+## AJAX Endpoints
+
+All endpoints use nonce verification for security:
+
+- `send_magic_link` - Send magic link to user
+- `toggle_bookmark` - Add/remove bookmark
+- `get_bookmark_count` - Get user's bookmark count
+- `send_bookmarks_access_link` - Send access link for bookmarks page
+- `export_emails` - Export email list as CSV (admin only)
+- `sync_emails_to_convertkit` - Sync all emails to ConvertKit
+
 ## Shortcodes
 
 ### `[healthcare_bookmarks]`
-Displays a responsive grid of user's bookmarked healthcare providers with thumbnails, excerpts, and action buttons.
+Displays a responsive grid of user's bookmarked healthcare providers with:
+- Provider thumbnails
+- Title and excerpt
+- View provider link
+- Remove bookmark option
 
-**Usage:**
-```
-[healthcare_bookmarks]
-```
+## Gutenberg Blocks
 
-## Hooks & Filters
+### Healthcare Bookmark Button
+- **Name**: `healthcare-bookmarks/bookmark-button`
+- **Usage**: Add to healthcare provider posts
+- **Features**: Dynamic state, AJAX powered
 
-### Actions
-- `hb_user_bookmarked` - Fired when user bookmarks a post
-- `hb_user_removed_bookmark` - Fired when user removes bookmark
-- `hb_magic_link_used` - Fired when magic link is used
-
-### Filters
-- `hb_email_subject` - Filter magic link email subject
-- `hb_email_message` - Filter magic link email content
-- `hb_bookmark_card_html` - Filter bookmark card HTML
-
-## Requirements
-
-- WordPress 5.0+
-- PHP 7.4+
-- Custom post type: `healthcare_provider`
-- Email functionality (wp_mail)
-
-## Configuration Options
-
-### Email Templates
-Customize in **Settings → Healthcare Bookmarks**:
-- **Subject Line**: Use `[POST_TITLE]` placeholder
-- **Email Message**: Use `[POST_TITLE]` and `[MAGIC_LINK]` placeholders
-
-### Magic Link Security
-- Links expire after 15 minutes
-- One-time use tokens
-- Secure token generation
-
-## Database Tables
-
-The plugin creates two custom tables:
-
-### `wp_healthcare_bookmarks`
-- `id` - Unique bookmark ID
-- `user_id` - WordPress user ID  
-- `post_id` - Healthcare provider post ID
-- `created_at` - Bookmark timestamp
-
-### `wp_healthcare_emails`
-- `id` - Unique email ID
-- `email` - Email address
-- `created_at` - Collection timestamp
-
-## Admin Features
-
-### Settings Page
-- **Location**: Settings → Healthcare Bookmarks
-- **Features**: Email template customization, statistics, page URL setting
-
-### Statistics Dashboard
-- Total emails collected
-- Total bookmarks created
-- Export functionality (future enhancement)
-
-## Styling & Customization
-
-### CSS Classes
-- `.hb-bookmark-btn` - Bookmark button
-- `.hb-counter` - Header counter
-- `.hb-bookmarks-grid` - Bookmarks grid container
-- `.hb-bookmark-card` - Individual bookmark card
-
-### Responsive Design
-- Mobile-first approach
-- Breakpoints at 768px
-- Touch-friendly interface
+### Healthcare Bookmark Counter
+- **Name**: `healthcare-bookmarks/bookmark-counter`
+- **Usage**: Add to header/navigation
+- **Features**: Live count updates, links to bookmarks page
 
 ## Security Features
 
-- Nonce verification for all AJAX requests
-- Email sanitization and validation
-- SQL injection prevention
-- XSS protection
-- Rate limiting on magic link generation
+- **Rate Limiting**: 2-minute cooldown between magic link requests
+- **Nonce Verification**: All AJAX requests verified
+- **Input Sanitization**: All user inputs sanitized
+- **SQL Injection Prevention**: Prepared statements used
+- **One-Time Tokens**: Magic links expire after single use
+- **Time Expiration**: Magic links expire after 15 minutes
 
 ## Troubleshooting
 
-### Magic Links Not Working
-1. Check email delivery (wp_mail functionality)
-2. Verify 15-minute expiration window
-3. Check spam folder
-4. Ensure WordPress cron is working
+### Emails Not Sending
+- Verify WordPress email configuration
+- Check spam folder
+- Consider using SMTP plugin
+- Test with Tools → Site Health
 
-### Blocks Not Appearing
-1. Clear cache/refresh block editor
-2. Check file permissions
-3. Verify JavaScript console for errors
+### ConvertKit Sync Issues
+- Verify API key is correct
+- Check Form ID exists
+- Ensure ConvertKit account is active
+- Check WordPress error logs
+- Verify tag limits haven't been exceeded
 
-### Bookmarks Not Saving
-1. Check user permissions
-2. Verify database tables were created
-3. Check for plugin conflicts
+### Database Update Required
+After updating the plugin:
+1. Deactivate the plugin
+2. Reactivate the plugin
+3. This will update the database schema
 
-### Email Collection Issues
-1. Verify wp_mail() functionality
-2. Check SMTP configuration
-3. Test with simple email first
+### Cities/Specialties Not Tracking
+- Verify taxonomies exist and are assigned to posts
+- Check that taxonomy slugs are exactly 'location' and 'specialties'
+- Ensure terms are assigned to healthcare providers
+
+## Hooks and Filters
+
+### Actions
+- `hb_bookmark_added` - Fired when a bookmark is added
+- `hb_bookmark_removed` - Fired when a bookmark is removed
+- `hb_email_captured` - Fired when an email is captured
+- `hb_convertkit_synced` - Fired after ConvertKit sync
+
+### Filters
+- `hb_magic_link_expiry` - Modify magic link expiration (default: 15 minutes)
+- `hb_rate_limit_duration` - Modify rate limiting (default: 2 minutes)
+- `hb_convertkit_tags` - Filter tags before sending to ConvertKit
 
 ## Support
 
-For support, please check:
-1. WordPress error logs
-2. Browser console for JavaScript errors
-3. Plugin settings configuration
+For issues or questions:
+1. Check WordPress error logs
+2. Review plugin settings
+3. Verify taxonomy configuration
+4. Test email functionality
 
 ## Changelog
+
+### Version 1.1.0
+- Added ConvertKit integration
+- Added city tracking from location taxonomy
+- Added specialty tracking from specialties taxonomy
+- Enhanced email subscriber management
+- Added bulk sync to ConvertKit
 
 ### Version 1.0.0
 - Initial release
 - Magic link authentication
-- Email capture functionality
-- Gutenberg blocks
+- Bookmark management
+- Email capture
 - Admin dashboard
-- Mobile responsive design
 
 ## License
 
-This plugin is licensed under GPL v2 or later.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+This plugin is proprietary software. All rights reserved.
 
 ---
 
-**Note**: This plugin is designed specifically for healthcare provider post types. Ensure your WordPress site has the `healthcare_provider` custom post type configured before use.
+**Note**: This plugin requires the `healthcare_provider` custom post type with `location` and `specialties` taxonomies properly configured.
