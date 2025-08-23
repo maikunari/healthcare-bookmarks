@@ -32,9 +32,11 @@ class HealthcareBookmarks {
         add_action('wp_ajax_export_emails', array($this, 'export_emails'));
         add_action('wp_ajax_send_bookmarks_access_link', array($this, 'send_bookmarks_access_link'));
         add_action('wp_ajax_nopriv_send_bookmarks_access_link', array($this, 'send_bookmarks_access_link'));
+        add_action('wp_ajax_sync_emails_to_convertkit', array($this, 'sync_emails_to_convertkit'));
         add_action('template_redirect', array($this, 'handle_magic_link'));
         add_action('admin_init', array($this, 'block_dashboard_access'));
-        add_action('wp_before_admin_bar_render', array($this, 'hide_admin_bar_for_bookmark_users'));
+        add_action('init', array($this, 'hide_admin_bar_for_bookmark_users'));
+        add_action('after_setup_theme', array($this, 'remove_admin_bar'));
         
         register_activation_hook(__FILE__, array($this, 'create_tables'));
         add_action('init', array($this, 'register_blocks'));
@@ -55,6 +57,7 @@ class HealthcareBookmarks {
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             user_id bigint(20) NOT NULL,
             post_id bigint(20) NOT NULL,
+            city varchar(100) DEFAULT NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY user_post (user_id, post_id)
@@ -64,6 +67,7 @@ class HealthcareBookmarks {
         $sql2 = "CREATE TABLE $this->emails_table (
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             email varchar(100) NOT NULL,
+            cities text DEFAULT NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY email (email)
@@ -76,6 +80,9 @@ class HealthcareBookmarks {
         // Set default options
         add_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
         add_option('hb_email_message', 'Click the link below to bookmark this healthcare provider:\n\n[MAGIC_LINK]\n\nThis link expires in 15 minutes.');
+        add_option('hb_convertkit_api_key', '');
+        add_option('hb_convertkit_form_id', '');
+        add_option('hb_convertkit_enabled', false);
     }
     
     public function enqueue_scripts() {
@@ -212,12 +219,20 @@ class HealthcareBookmarks {
         // Set rate limit (1 email per 2 minutes per email address)
         set_transient('hb_rate_limit_' . md5($email), true, 2 * 60);
         
+        // Get city from the post
+        $city = $this->get_post_city($post_id);
+        
         // Store email with consent flag
         global $wpdb;
         $wpdb->replace($this->emails_table, array(
             'email' => $email,
+            'cities' => $city ? json_encode(array($city)) : null,
             'created_at' => current_time('mysql')
         ));
+        
+        // Send to ConvertKit if enabled with city tag
+        $cities = $city ? array($city) : array();
+        $this->add_to_convertkit($email, $cities);
         
         // Generate secure magic link token
         $token = wp_generate_password(32, false);
@@ -342,13 +357,18 @@ class HealthcareBookmarks {
         wp_set_current_user($user->ID);
         wp_set_auth_cookie($user->ID, false, is_ssl()); // Secure cookie if SSL
         
-        // Add bookmark
+        // Add bookmark with city
+        $city = $this->get_post_city($post_id);
         global $wpdb;
         $result = $wpdb->replace($this->table_name, array(
             'user_id' => $user->ID,
             'post_id' => $post_id,
+            'city' => $city,
             'created_at' => current_time('mysql')
         ));
+        
+        // Update user's city list
+        $this->update_user_cities($email, $city);
         
         if ($result === false) {
             wp_die('Failed to save bookmark.', 'Bookmark Error', array('response' => 500));
@@ -416,12 +436,21 @@ class HealthcareBookmarks {
             ));
             wp_send_json_success(array('action' => 'removed', 'bookmarked' => false));
         } else {
-            // Add bookmark
+            // Add bookmark with city
+            $city = $this->get_post_city($post_id);
             $wpdb->insert($this->table_name, array(
                 'user_id' => $user_id,
                 'post_id' => $post_id,
+                'city' => $city,
                 'created_at' => current_time('mysql')
             ));
+            
+            // Update user's city list
+            $user = get_user_by('id', $user_id);
+            if ($user) {
+                $this->update_user_cities($user->user_email, $city);
+            }
+            
             wp_send_json_success(array('action' => 'added', 'bookmarked' => true));
         }
     }
@@ -597,12 +626,20 @@ class HealthcareBookmarks {
             update_option('hb_email_subject', sanitize_text_field($_POST['email_subject']));
             update_option('hb_email_message', sanitize_textarea_field($_POST['email_message']));
             update_option('hb_bookmarks_page', esc_url($_POST['bookmarks_page']));
+            update_option('hb_convertkit_api_key', sanitize_text_field($_POST['convertkit_api_key']));
+            update_option('hb_convertkit_form_id', sanitize_text_field($_POST['convertkit_form_id']));
+            update_option('hb_convertkit_enabled', isset($_POST['convertkit_enabled']) ? true : false);
+            update_option('hb_convertkit_city_tag_format', sanitize_text_field($_POST['convertkit_city_tag_format']));
             echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
         }
         
         $email_subject = get_option('hb_email_subject', 'Click to bookmark [POST_TITLE]');
         $email_message = get_option('hb_email_message', 'Click the link below to bookmark this healthcare provider:\n\n[MAGIC_LINK]\n\nThis link expires in 15 minutes.');
         $bookmarks_page = get_option('hb_bookmarks_page', '');
+        $convertkit_api_key = get_option('hb_convertkit_api_key', '');
+        $convertkit_form_id = get_option('hb_convertkit_form_id', '');
+        $convertkit_enabled = get_option('hb_convertkit_enabled', false);
+        $convertkit_city_tag_format = get_option('hb_convertkit_city_tag_format', 'city_prefix');
         
         global $wpdb;
         $email_count = $wpdb->get_var("SELECT COUNT(*) FROM $this->emails_table");
@@ -639,6 +676,43 @@ class HealthcareBookmarks {
                         <td>
                             <input type="url" name="bookmarks_page" value="<?php echo esc_attr($bookmarks_page); ?>" class="regular-text" />
                             <p class="description">URL of the page with the [healthcare_bookmarks] shortcode</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <h2>ConvertKit Integration</h2>
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">Enable ConvertKit</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="convertkit_enabled" <?php checked($convertkit_enabled, true); ?> />
+                                Automatically add email addresses to ConvertKit
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">ConvertKit API Key</th>
+                        <td>
+                            <input type="text" name="convertkit_api_key" value="<?php echo esc_attr($convertkit_api_key); ?>" class="regular-text" />
+                            <p class="description">Your ConvertKit API Key (found in Account Settings → Advanced)</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">ConvertKit Form ID</th>
+                        <td>
+                            <input type="text" name="convertkit_form_id" value="<?php echo esc_attr($convertkit_form_id); ?>" class="regular-text" />
+                            <p class="description">The Form ID to add subscribers to (found in your form's settings)</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">City Tag Format</th>
+                        <td>
+                            <select name="convertkit_city_tag_format">
+                                <option value="city_prefix" <?php selected($convertkit_city_tag_format, 'city_prefix'); ?>>With prefix (e.g., "City: San Francisco")</option>
+                                <option value="city_only" <?php selected($convertkit_city_tag_format, 'city_only'); ?>>City name only (e.g., "San Francisco")</option>
+                            </select>
+                            <p class="description">How city tags should be formatted in ConvertKit</p>
                         </td>
                     </tr>
                 </table>
@@ -684,10 +758,15 @@ class HealthcareBookmarks {
             $per_page, $offset
         ));
         
+        $convertkit_enabled = get_option('hb_convertkit_enabled', false);
+        
         ?>
         <div class="wrap">
             <h1>Email Subscribers 
                 <a href="#" class="page-title-action" id="export-emails">Export All</a>
+                <?php if ($convertkit_enabled): ?>
+                <a href="#" class="page-title-action" id="sync-convertkit">Sync to ConvertKit</a>
+                <?php endif; ?>
             </h1>
             
             <div class="hb-stats" style="background: #fff; padding: 20px; margin: 20px 0; border: 1px solid #ccc;">
@@ -735,6 +814,7 @@ class HealthcareBookmarks {
                                     <input type="checkbox" id="cb-select-all">
                                 </td>
                                 <th class="manage-column">Email Address</th>
+                                <th class="manage-column">Cities</th>
                                 <th class="manage-column">Date Subscribed</th>
                                 <th class="manage-column">Actions</th>
                             </tr>
@@ -746,6 +826,16 @@ class HealthcareBookmarks {
                                     <input type="checkbox" name="emails[]" value="<?php echo $email->id; ?>">
                                 </th>
                                 <td><strong><?php echo esc_html($email->email); ?></strong></td>
+                                <td>
+                                    <?php 
+                                    if ($email->cities) {
+                                        $cities = json_decode($email->cities, true);
+                                        echo esc_html(implode(', ', $cities));
+                                    } else {
+                                        echo '<em>No cities tracked</em>';
+                                    }
+                                    ?>
+                                </td>
                                 <td><?php echo date('M j, Y g:i A', strtotime($email->created_at)); ?></td>
                                 <td>
                                     <a href="mailto:<?php echo esc_attr($email->email); ?>" class="button button-small">Email</a>
@@ -794,6 +884,40 @@ class HealthcareBookmarks {
                     },
                     error: function() {
                         alert('Export failed. Please try again.');
+                    }
+                });
+            });
+            
+            // Sync to ConvertKit functionality
+            $('#sync-convertkit').on('click', function(e) {
+                e.preventDefault();
+                
+                if (!confirm('This will sync all email addresses to ConvertKit. Continue?')) {
+                    return;
+                }
+                
+                var button = $(this);
+                button.text('Syncing...').prop('disabled', true);
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'sync_emails_to_convertkit',
+                        nonce: '<?php echo wp_create_nonce('sync_convertkit_nonce'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            var data = response.data;
+                            alert('Sync complete!\n\nTotal: ' + data.total + '\nSuccess: ' + data.success + '\nFailed: ' + data.failed);
+                        } else {
+                            alert('Sync failed: ' + response.data);
+                        }
+                        button.text('Sync to ConvertKit').prop('disabled', false);
+                    },
+                    error: function() {
+                        alert('Sync failed. Please try again.');
+                        button.text('Sync to ConvertKit').prop('disabled', false);
                     }
                 });
             });
@@ -923,6 +1047,20 @@ class HealthcareBookmarks {
             
             if ($is_bookmark_user) {
                 show_admin_bar(false);
+                add_filter('show_admin_bar', '__return_false');
+            }
+        }
+    }
+    
+    public function remove_admin_bar() {
+        if (is_user_logged_in()) {
+            $user_id = get_current_user_id();
+            $is_bookmark_user = get_user_meta($user_id, 'hb_bookmark_user', true);
+            
+            if ($is_bookmark_user) {
+                show_admin_bar(false);
+                add_filter('show_admin_bar', '__return_false');
+                remove_action('wp_head', '_admin_bar_bump_cb');
             }
         }
     }
@@ -939,6 +1077,169 @@ class HealthcareBookmarks {
         } else {
             return sanitize_text_field($_SERVER['REMOTE_ADDR']); // Standard IP
         }
+    }
+    
+    // Helper Functions
+    
+    private function get_post_city($post_id) {
+        // Try to get city from custom field first
+        $city = get_post_meta($post_id, 'city', true);
+        
+        // If no custom field, try to extract from address field
+        if (!$city) {
+            $city = get_post_meta($post_id, 'location_city', true);
+        }
+        
+        // If still no city, try to extract from a location/address field
+        if (!$city) {
+            $address = get_post_meta($post_id, 'address', true);
+            if (!$address) {
+                $address = get_post_meta($post_id, 'location', true);
+            }
+            
+            // Simple extraction: look for city before state abbreviation
+            if ($address) {
+                // Match pattern like "City, ST" or "City ST"
+                if (preg_match('/([A-Za-z\s]+)(?:,?\s+)([A-Z]{2})\s+\d{5}/', $address, $matches)) {
+                    $city = trim($matches[1]);
+                }
+            }
+        }
+        
+        // If still no city, check post categories or tags for location info
+        if (!$city) {
+            $terms = wp_get_post_terms($post_id, array('location', 'city', 'healthcare_location'), array('fields' => 'names'));
+            if (!empty($terms)) {
+                $city = $terms[0];
+            }
+        }
+        
+        return $city ? sanitize_text_field($city) : '';
+    }
+    
+    private function update_user_cities($email, $city) {
+        if (!$city) return;
+        
+        global $wpdb;
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT cities FROM $this->emails_table WHERE email = %s",
+            $email
+        ));
+        
+        if ($existing) {
+            $cities = $existing->cities ? json_decode($existing->cities, true) : array();
+            if (!in_array($city, $cities)) {
+                $cities[] = $city;
+                $wpdb->update(
+                    $this->emails_table,
+                    array('cities' => json_encode($cities)),
+                    array('email' => $email)
+                );
+            }
+        }
+    }
+    
+    // ConvertKit Integration Functions
+    
+    private function add_to_convertkit($email, $cities = array()) {
+        if (!get_option('hb_convertkit_enabled')) {
+            return false;
+        }
+        
+        $api_key = get_option('hb_convertkit_api_key');
+        $form_id = get_option('hb_convertkit_form_id');
+        
+        if (empty($api_key) || empty($form_id)) {
+            return false;
+        }
+        
+        // Prepare tags for cities
+        $tags = array();
+        if (!empty($cities)) {
+            foreach ($cities as $city) {
+                // Create tag like "City: San Francisco" or just city name based on settings
+                $tag_format = get_option('hb_convertkit_city_tag_format', 'city_prefix');
+                if ($tag_format === 'city_prefix') {
+                    $tags[] = 'City: ' . $city;
+                } else {
+                    $tags[] = $city;
+                }
+            }
+        }
+        
+        $url = 'https://api.convertkit.com/v3/forms/' . $form_id . '/subscribe';
+        
+        $body_data = array(
+            'api_key' => $api_key,
+            'email' => $email
+        );
+        
+        // Add tags if we have any
+        if (!empty($tags)) {
+            $body_data['tags'] = $tags;
+        }
+        
+        $args = array(
+            'body' => json_encode($body_data),
+            'headers' => array(
+                'Content-Type' => 'application/json'
+            ),
+            'timeout' => 30
+        );
+        
+        $response = wp_remote_post($url, $args);
+        
+        if (is_wp_error($response)) {
+            error_log('ConvertKit API Error: ' . $response->get_error_message());
+            return false;
+        }
+        
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        if (isset($data['subscription'])) {
+            return true;
+        }
+        
+        error_log('ConvertKit API Response: ' . $body);
+        return false;
+    }
+    
+    public function sync_emails_to_convertkit() {
+        check_ajax_referer('sync_convertkit_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Insufficient permissions');
+        }
+        
+        if (!get_option('hb_convertkit_enabled')) {
+            wp_send_json_error('ConvertKit integration is not enabled');
+        }
+        
+        global $wpdb;
+        $emails = $wpdb->get_results("SELECT email, cities FROM $this->emails_table", ARRAY_A);
+        
+        $total = count($emails);
+        $success = 0;
+        $failed = 0;
+        
+        foreach ($emails as $row) {
+            $cities = $row['cities'] ? json_decode($row['cities'], true) : array();
+            if ($this->add_to_convertkit($row['email'], $cities)) {
+                $success++;
+            } else {
+                $failed++;
+            }
+            
+            // Add small delay to avoid rate limiting
+            usleep(100000); // 0.1 second delay
+        }
+        
+        wp_send_json_success(array(
+            'total' => $total,
+            'success' => $success,
+            'failed' => $failed
+        ));
     }
 }
 
